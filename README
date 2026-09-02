@@ -1,0 +1,30 @@
+# Medical RAG Pipeline
+
+## Project Description
+This project implements a **Retrieval-Augmented Generation (RAG)** system to answer medical questions based on specific reference documents. The system combines semantic search using **ChromaDB** and accurate text generation using the **Qwen/Qwen2.5-3B-Instruct** model from Hugging Face.
+
+## Data Sources
+The system processes and searches information from three types of document formats:
+- **PDF**: `diabetes.pdf`, `stroke.pdf`, `Blood pressure.pdf`, `Leukimia.pdf`
+- **JSON / JSONL**: `HealthCareMagic-100k.json`, `HealthCareMagic-100k-en.jsonl`
+- **CSV**: `medquad.csv`
+
+## Key Features
+1. **Multi-Source Retrieval**: Capable of simultaneously pulling relevant context from 3 separate vector databases (PDF, JSON, CSV).
+2. **4-Bit Quantization**: Uses the `BitsAndBytes` configuration to efficiently run a large language model (3B parameters) on Google Colab.
+3. **Custom Prompt**: Prevents language model hallucinations by enforcing strict instructions to answer only based on the gathered context.
+4. **Database Archiving**: The ability to back up (zip) and download ChromaDB for use in other sessions.
+
+## Requirements
+- A Hugging Face token placed in Colab Secrets named `LLMtoken`.
+- An execution environment with Hardware GPU Acceleration (T4 GPU recommended).
+
+## Usage Instructions
+1. Upload all reference documents to the root directory (`/content/`).
+2. Set up your Colab Secret (key icon 🔑) with your Hugging Face token as the *Value*, and name it `LLMtoken`.
+3. Run the notebook sequentially. The script will:
+   - Install required libraries (`langchain`, `chromadb`, `transformers`, etc.).
+   - Chunk the documents and load them into the Vector Database.
+   - Initialize the Qwen model.
+   - Build the combined RAG Pipeline.
+4. To test the system, change the `query` variable in the final execution cell to ask various medical questions.

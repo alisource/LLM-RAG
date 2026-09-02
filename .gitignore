@@ -1,0 +1,6 @@
+venv/
+.cache/
+chroma_db_pdf/
+chroma_db_json/
+chroma_db_csv/
+.env
