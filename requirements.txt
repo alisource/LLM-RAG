@@ -1,10 +1,11 @@
 streamlit
-langchain
-langchain-community
 langchain-huggingface
-transformers
-torch
-bitsandbytes
-accelerate
+langchain-community
+langchain-core
+langchain-chroma
 chromadb
+huggingface-hub
+torch
+torchvision
 sentence-transformers
+python-dotenv
