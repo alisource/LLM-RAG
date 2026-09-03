@@ -5,10 +5,11 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from transformers import pipeline, BitsAndBytesConfig
+from transformers.pipelines import pipeline
+from transformers import BitsAndBytesConfig
 
 # Konfigurasi Halaman Streamlit
 st.set_page_config(page_title="Multi-Source Medical RAG Assistant", page_icon="🤖")
@@ -22,12 +23,15 @@ def load_resources():
     # 1. Inisialisasi Embeddings (harus sama dengan saat pembuatan database)
     embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
 
-    # 2. Memuat kembali vector database terpisah dari direktori lokal
-    db_pdf = Chroma(persist_directory=r"C:\Users\Nur Ali Astaguna\Downloads\chroma_db_pdf", embedding_function=embeddings)
-    db_json = Chroma(persist_directory=r"C:\Users\Nur Ali Astaguna\Downloads\chroma_db_json", embedding_function=embeddings)
-    db_csv = Chroma(persist_directory=r"C:\Users\Nur Ali Astaguna\Downloads\chroma_db_csv", embedding_function=embeddings)
+    # Mendapatkan direktori tempat file app.py berada
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    # 3. Inisialisasi Model Qwen dengan Kuantisasi 4-bit
+    # 2. Memuat kembali vector database terpisah dari direktori lokal dengan absolute path
+    # Memuat kembali vector database menggunakan absolute path eksternal Anda
+    db_pdf = Chroma(persist_directory=os.path.join(BASE_DIR, "chroma_db_pdf"), embedding_function=embeddings)
+    db_json = Chroma(persist_directory=os.path.join(BASE_DIR, "chroma_db_json"), embedding_function=embeddings)
+    db_csv = Chroma(persist_directory=os.path.join(BASE_DIR, "chroma_db_csv"), embedding_function=embeddings)
+    # 3. Inisialisasi Model Qwen dengan Kuantisasi 4-bit aman
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -35,14 +39,17 @@ def load_resources():
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True
+        bnb_4bit_use_double_quant=True,
+        llm_int8_enable_fp32_cpu_offload=True
     )
 
     llm_qwen = pipeline(
         "text-generation",
         model="Qwen/Qwen2.5-3B-Instruct",
-        device_map="auto",
-        model_kwargs={"quantization_config": quantization_config},
+        model_kwargs={
+            "quantization_config": quantization_config,
+            "device_map": "auto"
+        },
         max_new_tokens=150,
         pad_token_id=151643
     )
@@ -84,7 +91,7 @@ def call_huggingface_pipeline(prompt_value):
         max_new_tokens=150, 
         pad_token_id=151643,
         repetition_penalty=1.2,
-        do_sample=False  # Menjaga agar hasil respons stabil dan deterministik
+        do_sample=False
     )
     generated_text = result[0]['generated_text']
     if prompt_str in generated_text:
@@ -109,14 +116,11 @@ user_query = st.text_input("Masukkan pertanyaan Anda (Contoh: What are the sympt
 
 if user_query:
     with st.spinner("Sedang mencari jawaban..."):
-        # Jalankan RAG chain
         response_bio = rag_chain_bio.invoke(user_query)
         
-        # Tampilkan Jawaban
         st.subheader("Jawaban:")
         st.write(response_bio)
         
-        # Tampilkan Dokumen Sumber
         st.subheader("Sumber Dokumen:")
         retrieved_docs = retrieve_multi_source_docs(user_query)
         
