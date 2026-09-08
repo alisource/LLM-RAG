@@ -89,21 +89,28 @@ user_query = st.text_input("Masukkan pertanyaan Anda (Contoh: What are the sympt
 
 if user_query:
     with st.spinner("Sedang mencari jawaban..."):
-        # Menghindari duplikasi pencarian ke ChromaDB: panggil sekali lalu pakai hasilnya untuk LLM dan Tampilan UI
+        # 1. Ambil dokumen dari ChromaDB
         retrieved_docs = retrieve_multi_source_docs(user_query)
         context_text = format_docs(retrieved_docs)
         
-        # Format prompt dan panggil LLM secara langsung tanpa eksekusi ulang retrieval
+        # 2. Kirim prompt ke LLM
         formatted_prompt = PROMPT.format(context=context_text, question=user_query)
         response_bio = llm_groq.invoke(formatted_prompt).content
         
+        # 3. Tampilkan Jawaban LLM
         st.subheader("Jawaban:")
         st.write(response_bio)
         
-        st.subheader("Sumber Dokumen:")
-        for i, doc in enumerate(retrieved_docs):
-            source_name = doc.metadata.get('source') or doc.metadata.get('file_name') or doc.metadata.get('source_file') or 'unknown'
-            display_name = os.path.basename(source_name) if source_name != 'unknown' else 'Database Lokal'
-            
-            with st.expander(f"Dokumen {i+1} (Sumber: {display_name})"):
+        # 4. HANYA TAMPILKAN SUMBER DOKUMEN JIKA JAWABAN MENGGUNAKAN KONTEKS MEDIS
+        # (Memeriksa apakah jawaban mengandung kata medis/disclaimer atau bukan pertanyaan umum)
+        is_general_response = "President" in response_bio or "Putin" in response_bio or "tidak berkaitan" in response_bio.lower()
+        
+        if not is_general_response:
+            st.subheader("Sumber Dokumen:")
+            for i, doc in enumerate(retrieved_docs):
+                source_name = doc.metadata.get('source') or doc.metadata.get('file_name') or doc.metadata.get('source_file') or 'unknown'
+                display_name = os.path.basename(source_name) if source_name != 'unknown' else 'Database Lokal'
+                
+                with st.expander(f"Dokumen {i+1} (Sumber: {display_name})"):
+                    st.write(doc.page_content)
                 st.write(doc.page_content)
