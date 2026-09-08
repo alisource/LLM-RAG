@@ -13,3 +13,4 @@ langchain-core>=0.3.0
 langchain-huggingface>=0.1.0
 sentence-transformers>=3.0.1
 python-dotenv>=1.0.1
+langchain-groq
