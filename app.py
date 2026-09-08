@@ -9,12 +9,9 @@ from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_groq import ChatGroq
 from langchain_core.output_parsers import StrOutputParser
 
-# Konfigurasi Halaman Streamlit
 st.set_page_config(page_title="Multi-Source Medical RAG Assistant", page_icon="🤖")
 
-# Memuat token API dari file .env lokal
 load_dotenv()
-# Pastikan file .env Anda berisi variabel: GROQ_API_KEY=your_groq_api_key_here
 groq_api_key = os.getenv("GROQ_API_KEY")
 
 if not groq_api_key:
@@ -24,48 +21,50 @@ if not groq_api_key:
         groq_api_key = None
 
 if not groq_api_key:
-    st.error("GROQ_API_KEY tidak ditemukan! Buat file .env di lokal atau isi Secrets di Streamlit Cloud.")
+    st.error("GROQ_API_KEY tidak ditemukan!")
     st.stop()
 
 @st.cache_resource
 def load_resources():
-    # 1. Inisialisasi Embeddings (tetap menggunakan HuggingFace karena sangat ringan & lokal)
     embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2')
-
-    # Mendapatkan direktori tempat file app.py berada
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-    # 2. Memuat kembali vector database terpisah dari direktori lokal dengan absolute path
     db_pdf = Chroma(persist_directory=os.path.join(BASE_DIR, "chroma_db_pdf"), embedding_function=embeddings)
     db_json = Chroma(persist_directory=os.path.join(BASE_DIR, "chroma_db_json"), embedding_function=embeddings)
     db_csv = Chroma(persist_directory=os.path.join(BASE_DIR, "chroma_db_csv"), embedding_function=embeddings)
     
-    # 3. Inisialisasi LLM menggunakan Groq dengan model yang tersedia
+    # Model Groq
     llm_groq = ChatGroq(
-        model="openai/gpt-oss-20b",
+        model="llama-3.3-70b-versatile", # Disarankan memakai llama-3.3-70b jika gpt-oss bermasalah
         temperature=0.0
     )
 
     return db_pdf, db_json, db_csv, llm_groq
 
-# Memuat resource (database & Groq LLM di-cache agar efisien)
 db_pdf, db_json, db_csv, llm_groq = load_resources()
 
-# 4. Konfigurasi Prompt & Retriever
-template = """Gunakan konteks berikut untuk menjawab pertanyaan. Jika Anda tidak tahu jawabannya, katakan saja bahwa Anda tidak tahu.
+# --- PROMPT TEMPLATE YANG DIPERKETAT ---
+template = """Kamu adalah Asisten Informasi Kesehatan.
 
-Konteks:
+Jawablah pertanyaan berdasarkan aturan berikut:
+1. JIKA pertanyaan berkaitan dengan kesehatan/medis, gunakan Konteks di bawah ini untuk menjawabnya secara akurat.
+2. JIKA pertanyaan SAMA SEKALI TIDAK berkaitan dengan kesehatan/medis (contoh: pertanyaan politik, umum, sejarah, geografi):
+   - Jawab pertanyaan tersebut secara langsung berdasarkan pengetahuan umummu.
+   - DILARANG KERAS menyertakan istilah medis, saran kesehatan, atau disclaimer medis/dokter sama sekali.
+
+Konteks Medis:
 {context}
 
 Pertanyaan:
 {question}
+
 Jawaban:"""
 
 PROMPT = PromptTemplate.from_template(template)
 
-retriever_pdf = db_pdf.as_retriever(search_kwargs={"k": 4})
-retriever_json = db_json.as_retriever(search_kwargs={"k": 4})
-retriever_csv = db_csv.as_retriever(search_kwargs={"k": 4})
+retriever_pdf = db_pdf.as_retriever(search_kwargs={"k": 2})
+retriever_json = db_json.as_retriever(search_kwargs={"k": 2})
+retriever_csv = db_csv.as_retriever(search_kwargs={"k": 2})
 
 def retrieve_multi_source_docs(query):
     docs_p = retriever_pdf.invoke(query)
@@ -76,36 +75,35 @@ def retrieve_multi_source_docs(query):
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
-# 5. Susun RAG Chain menggunakan LCEL dengan Groq & Output Parser
-rag_chain_bio = (
-    {
-        "context": RunnableLambda(retrieve_multi_source_docs) | RunnableLambda(format_docs), 
-        "question": RunnablePassthrough()
-    }
-    | PROMPT
-    | llm_groq
-    | StrOutputParser()
-)
-
-# --- Antarmuka Pengguna (Streamlit UI) ---
+# --- UI STREAMLIT ---
 st.title("Medical RAG Assistant (Groq Cloud)")
 st.write("Tanyakan informasi kesehatan berdasarkan basis data lokal Anda (PDF, JSON, & CSV).")
 
-user_query = st.text_input("Masukkan pertanyaan Anda (Contoh: What are the symptoms of Glaucoma?):")
+# Fitur Tambahan: Reset Session agar memori lama tidak mengendap
+if st.sidebar.button("Clear Chat / Reset"):
+    st.session_state.clear()
+    st.rerun()
+
+user_query = st.text_input("Masukkan pertanyaan Anda:")
 
 if user_query:
-    with st.spinner("Sedang mencari jawaban..."):
-        response_bio = rag_chain_bio.invoke(user_query)
+    with st.spinner("Sedang memproses..."):
+        # 1. Ambil dokumen sekali saja agar efisien
+        retrieved_docs = retrieve_multi_source_docs(user_query)
+        context_text = format_docs(retrieved_docs)
+        
+        # 2. Format prompt
+        formatted_prompt = PROMPT.format(context=context_text, question=user_query)
+        
+        # 3. Panggil LLM
+        response_bio = llm_groq.invoke(formatted_prompt).content
         
         st.subheader("Jawaban:")
         st.write(response_bio)
         
-        st.subheader("Sumber Dokumen:")
-        retrieved_docs = retrieve_multi_source_docs(user_query)
-        
-        for i, doc in enumerate(retrieved_docs):
-            source_name = doc.metadata.get('source') or doc.metadata.get('file_name') or doc.metadata.get('source_file') or 'unknown'
-            display_name = os.path.basename(source_name) if source_name != 'unknown' else 'Database Lokal'
-            
-            with st.expander(f"Dokumen {i+1} (Sumber: {display_name})"):
-                st.write(doc.page_content)
+        # Tampilkan sumber dokumen
+        with st.expander("Lihat Dokumen Konteks yang Ditarik dari Database"):
+            for i, doc in enumerate(retrieved_docs):
+                source_name = doc.metadata.get('source') or doc.metadata.get('file_name') or 'Database Lokal'
+                st.markdown(f"**Dokumen {i+1}** (*{os.path.basename(source_name)}*)")
+                st.text(doc.page_content[:300] + "...")
